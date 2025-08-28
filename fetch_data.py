@@ -191,12 +191,16 @@ class AShareAnalyzer:
             print(f"加载历史数据失败: {e}")
             return None
     
-    def get_historical_summary(self, days: int = 7) -> Dict:
-        """获取最近N天的数据摘要"""
+    def get_historical_summary(self, max_days: int = 7) -> Dict:
+        """获取最近有数据的N天数据摘要（最多max_days天）"""
         summary = []
         base_date = datetime.datetime.now()
         
-        for i in range(days):
+        # 向前搜索最多30天，找到有效数据
+        for i in range(30):  # 最多搜索30天来找到有效数据
+            if len(summary) >= max_days:  # 已经找到足够的数据
+                break
+                
             date = (base_date - datetime.timedelta(days=i)).strftime('%Y%m%d')
             data = self.load_historical_data(date)
             
@@ -213,21 +217,51 @@ class AShareAnalyzer:
                 
                 # 只有当有有效数据时才添加到摘要中
                 if has_market_data or has_yesterday_data:
+                    # 安全提取数值的函数
+                    def safe_extract_number(value, default=0):
+                        if value is None:
+                            return default
+                        if isinstance(value, (int, float)):
+                            return value
+                        if isinstance(value, str):
+                            # 处理百分比格式
+                            if '%' in value:
+                                try:
+                                    return float(value.replace('%', ''))
+                                except ValueError:
+                                    return default
+                            # 处理"亿"格式
+                            if '亿' in value:
+                                try:
+                                    return float(value.replace('亿', ''))
+                                except ValueError:
+                                    return default
+                            # 处理普通数字字符串
+                            try:
+                                return float(value)
+                            except ValueError:
+                                return default
+                        return default
+                    
                     day_summary = {
                         'date': date,
-                        'limit_up_count': market_stats.get('涨停数量', 0),
-                        'limit_down_count': market_stats.get('跌停数量', 0),
-                        'money_effect': market_stats.get('赚钱效应', 0),
-                        'exploded_rate': market_stats.get('炸板率', 0),
-                        'sz_index_change': market_stats.get('上证指数涨幅', 0),
-                        'yesterday_limit_count': yesterday_perf.get('昨日涨停股数量', 0),
-                        'yesterday_avg_perf': yesterday_perf.get('今日平均表现', 0),
-                        'yesterday_up_ratio': yesterday_perf.get('今日上涨比例', 0),
-                        'exploded_avg_perf': yesterday_perf.get('昨日炸板股今日平均', 0),
+                        'limit_up_count': safe_extract_number(market_stats.get('涨停数量', 0)),
+                        'limit_down_count': safe_extract_number(market_stats.get('跌停数量', 0)),
+                        'up_down_ratio': market_stats.get('涨跌停比', 'N/A'),  # 涨跌停比
+                        'total_amount': safe_extract_number(market_stats.get('总成交额', 0)),  # 总成交量
+                        'sz_amount_rate': safe_extract_number(market_stats.get('上证量比', 0)),  # 上证量比
+                        'sz_index_change': safe_extract_number(market_stats.get('上证指数涨幅', 0)),
+                        'money_effect': safe_extract_number(market_stats.get('赚钱效应', 0)),
+                        'exploded_rate': safe_extract_number(market_stats.get('炸板率', 0)),
+                        'yesterday_limit_count': safe_extract_number(yesterday_perf.get('昨日涨停股数量', 0)),
+                        'yesterday_avg_perf': safe_extract_number(yesterday_perf.get('今日平均表现', 0)),
+                        'yesterday_up_ratio': safe_extract_number(yesterday_perf.get('今日上涨比例', 0)),
+                        'exploded_avg_perf': safe_extract_number(yesterday_perf.get('昨日炸板股今日平均', 0)),  # 炸板表现
                         'has_valid_data': has_market_data and has_yesterday_data
                     }
                     summary.append(day_summary)
         
+        logger.info(f"成功获取 {len(summary)} 天历史数据摘要")
         return {'historical_summary': summary}
         
     def classify_stock_board(self, stock_code: str) -> str:
@@ -293,6 +327,7 @@ class AShareAnalyzer:
             
             result = []
             consecutive_days_stats = {}
+
             
             for _, row in limit_up_data.iterrows():
                 stock_code = row['代码']
@@ -400,7 +435,7 @@ class AShareAnalyzer:
         all_stocks.sort(key=lambda x: x['涨跌幅'], reverse=True)
         return all_stocks[:top_n]
     
-    def get_(self) -> Dict:
+    def get_market_stats(self) -> Dict:
         """获取市场整体统计数据（按板块分类）"""
         logger.info("开始获取市场整体统计数据")
         print("正在获取市场整体数据...")
@@ -460,7 +495,7 @@ class AShareAnalyzer:
                     
                     logger.info(f"各板块涨停数量: {board_limit_up_counts}")
                     logger.info(f"主板外涨停数量: {greater_than_ten_of_limit_up}")
-                
+                consecutive_limit_ups = len(limit_up_data[limit_up_data['连板数'] >= 2])
                 logger.debug("获取炸板股池数据")
                 # 获取炸板股池（开板的涨停股）
                 exploded_data = ak.stock_zt_pool_zbgc_em(date=self.today)
@@ -575,11 +610,12 @@ class AShareAnalyzer:
                 '跌停数量': limit_down_count,
                 '主板外跌停数量': greater_than_ten_of_limit_down,
                 '跌幅大于10%的非跌停股票数': greater_than_ten_of_not_limit_down,
+                '连板数量': consecutive_limit_ups,
                 '上涨股票数': up_count,
                 '下跌股票数': down_count,
                 '平盘股票数': flat_count,
-                '赚钱效应': f'{round(money_effect, 2)}%',
-                '炸板率': f'{round(exploded_rate, 2)}%',
+                '赚钱效应': round(money_effect, 2),
+                '炸板率': round(exploded_rate, 2),
                 
                 '分板块统计': board_stats
                 
@@ -652,7 +688,7 @@ class AShareAnalyzer:
             return {'昨日涨停股表现': f'分析失败: {e}'}
     
     def get_intraday_extremes(self) -> Dict:
-        """获取当日盘中极值股票（按板块分类统计）"""
+        """获取当日盘中极值股票（按板块分类统计，设置不同阈值）"""
         print("正在获取当日盘中极值股票...")
         
         try:
@@ -666,6 +702,14 @@ class AShareAnalyzer:
             stock_data['收盘较最低涨幅'] = ((stock_data['最新价'] - stock_data['最低']) / stock_data['最低'] * 100).round(2)
             stock_data['收盘较最高跌幅'] = ((stock_data['最新价'] - stock_data['最高']) / stock_data['最高'] * 100).round(2)
             
+            # 设置不同板块的阈值
+            board_thresholds = {
+                '主板': 15.0,
+                '科创板': 25.0,
+                '创业板': 25.0,
+                '北交所': 35.0
+            }
+            
             results = {}
             
             # 按板块分别统计极值
@@ -675,18 +719,23 @@ class AShareAnalyzer:
                 if board_data.empty:
                     continue
                 
-                # 收盘比当天最低点涨幅最大的5个股票
-                top_low_gainers = board_data.nlargest(5, '收盘较最低涨幅')[
+                threshold = board_thresholds[board]
+                
+                # 收盘比当天最低点涨幅大于阈值的股票，取前5个
+                filtered_gainers = board_data[board_data['收盘较最低涨幅'] > threshold]
+                top_low_gainers = filtered_gainers.nlargest(5, '收盘较最低涨幅')[
                     ['代码', '名称', '最新价', '最低', '收盘较最低涨幅', '板块']
                 ].to_dict('records')
                 
-                # 收盘比当天最高点跌幅最大的5个股票  
-                top_high_losers = board_data.nsmallest(5, '收盘较最高跌幅')[
+                # 收盘比当天最高点跌幅大于阈值的股票（绝对值），取前5个
+                # 对于跌幅，我们看绝对值大于阈值的（即跌幅超过阈值）
+                filtered_losers = board_data[board_data['收盘较最高跌幅'] < -threshold]
+                top_high_losers = filtered_losers.nsmallest(5, '收盘较最高跌幅')[
                     ['代码', '名称', '最新价', '最高', '收盘较最高跌幅', '板块']
                 ].to_dict('records')
                 
-                results[f'{board}-收盘较最低涨幅前5'] = top_low_gainers
-                results[f'{board}-收盘较最高跌幅前5'] = top_high_losers
+                results[f'{board}-收盘较最低涨幅前5(>{threshold}%)'] = top_low_gainers
+                results[f'{board}-收盘较最高跌幅前5(>{threshold}%)'] = top_high_losers
             
             return results
             
@@ -770,49 +819,41 @@ class AShareAnalyzer:
         results['5连涨停以上股票'] = limit_up_stocks
         logger.info(f"步骤1完成: 找到 {len(limit_up_stocks)} 只5连板以上股票")
         
-        # 2. 各时间段涨幅排名（按板块分类，应用极值过滤）
-        # logger.info("步骤2: 获取各时间段涨幅排名")
-        # for days in [10, 20, 30, 50]:
-        #     logger.debug(f"获取近{days}日涨幅排名")
-        #     board_gainers = self.get_top_gainers_by_board(days, 5)
-        #     results[f'近{days}日分板块涨幅前5'] = board_gainers
-        # logger.info("步骤2完成: 所有时间段涨幅排名获取完毕")
-        
-        # 3. 市场整体数据
-        logger.info("步骤3: 获取市场整体统计数据")
+        # 2. 市场整体数据
+        logger.info("步骤2: 获取市场整体统计数据")
         market_stats = self.get_market_stats()
         results['市场统计'] = market_stats
-        logger.info("步骤3完成: 市场统计数据获取完毕")
+        logger.info("步骤2完成: 市场统计数据获取完毕")
         
-        # 4. 昨日涨停股表现
+        # 3. 昨日涨停股表现
         logger.info("步骤4: 分析昨日涨停股表现")
         yesterday_perf = self.get_yesterday_performance()
         results['昨日涨停股表现'] = yesterday_perf
-        logger.info("步骤4完成: 昨日涨停股表现分析完毕")
+        logger.info("步骤3完成: 昨日涨停股表现分析完毕")
         
-        # 5. 盘中极值股票
+        # 4. 盘中极值股票
         logger.info("步骤5: 获取盘中极值股票")
         intraday_extremes = self.get_intraday_extremes()
         results.update(intraday_extremes)
-        logger.info(f"步骤5完成: 获取了 {len(intraday_extremes)} 项极值数据")
+        logger.info(f"步骤4完成: 获取了 {len(intraday_extremes)} 项极值数据")
         
-        # 6. 板块分析
+        # 5. 板块分析
         logger.info("步骤6: 进行行业板块分析")
         sector_analysis = self.get_sector_analysis()
         results.update(sector_analysis)
-        logger.info(f"步骤6完成: 获取了 {len(sector_analysis)} 项板块分析数据")
+        logger.info(f"步骤5完成: 获取了 {len(sector_analysis)} 项板块分析数据")
         
-        # 7. 跌幅分析
+        # 6. 跌幅分析
         logger.info("步骤7: 进行跌幅分析")
         decline_analysis = self.get_decline_analysis()
         results.update(decline_analysis)
-        logger.info(f"步骤7完成: 获取了 {len(decline_analysis)} 项跌幅分析数据")
+        logger.info(f"步骤6完成: 获取了 {len(decline_analysis)} 项跌幅分析数据")
         
-        # 8. 获取历史数据摘要
-        # logger.info("步骤8: 获取历史数据摘要")
-        # historical_summary = self.get_historical_summary(7)
-        # results.update(historical_summary)
-        # logger.info(f"步骤8完成: 获取了 {len(historical_summary)} 项历史数据")
+        # 7. 获取历史数据摘要
+        logger.info("步骤8: 获取历史数据摘要")
+        historical_summary = self.get_historical_summary(1)
+        results.update(historical_summary)
+        logger.info(f"步骤7完成: 获取了 {len(historical_summary)} 项历史数据")
         
         # 统计分析用时
         analysis_end_time = datetime.datetime.now()
@@ -866,19 +907,29 @@ def main():
             historical = results['historical_summary']
             if historical:
                 logger.info(f"显示近7天历史数据摘要，包含 {len(historical)} 天数据")
-                print(f"\n【近7日市场概况】")
-                print("日期       涨停 跌停 赚钱效应 炸板率 上证涨幅 | 昨涨停数 平均表现 上涨率")
-                print("-" * 75)
+                print(f"\n【近{len(historical)}日市场概况】")
+                print("日期       涨停 跌停 涨跌停比          成交额 上证涨幅   量比  赚钱效应 炸板率 | 昨涨停数 涨停表现  上涨率 炸板表现")
+                print("-" * 130)
                 for day in historical:
                     # 检查数据有效性
                     valid_marker = "" if day.get('has_valid_data', False) else " *"
+                    up_down_ratio = str(day.get('up_down_ratio', 'N/A'))
+                    if len(up_down_ratio) > 18:
+                        up_down_ratio = up_down_ratio[:16] + ".."
+                    
                     print(f"{day['date']} {day['limit_up_count']:4d} {day['limit_down_count']:4d} "
-                          f"{day['money_effect']:7.2f}% {day['exploded_rate']:6.2f}% {day['sz_index_change']:7.2f}% | "
-                          f"{day['yesterday_limit_count']:7d} {day['yesterday_avg_perf']:7.2f}% {day['yesterday_up_ratio']:6.2f}%{valid_marker}")
+                          f"{up_down_ratio:18s} {day['total_amount']:6.0f}亿 {day['sz_index_change']:7.2f}% {day['sz_amount_rate']:4.2f} "
+                          f"{day['money_effect']:7.2f}% {day['exploded_rate']:6.2f}% | "
+                          f"{day['yesterday_limit_count']:7d} {day['yesterday_avg_perf']:8.2f}% {day['yesterday_up_ratio']:6.2f}% {day['exploded_avg_perf']:7.2f}%{valid_marker}")
                 
                 # 添加说明
                 if any(not day.get('has_valid_data', False) for day in historical):
-                    print("\n* 标记的日期数据获取失败（网络问题或接口异常）")
+                    print("\n* 标记的日期数据不完整")
+                    
+                # 添加字段说明
+                print("\n字段说明:")
+                print("涨跌停比=涨停(主板外)+涨幅>10%非涨停:跌停(主板外)+跌幅>10%非跌停")
+                print("炸板表现=昨日炸板股今日平均表现")
             else:
                 logger.warning("历史数据摘要为空")
         
