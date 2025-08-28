@@ -12,7 +12,7 @@ akshare是一个开源财经数据接口库，github地址是https://github.com/
 ## Development Commands
 
 - **Install dependencies**: `uv sync`
-- **Run the main application**: `python fetch_data.py` or `uv run python fetch_data.py`
+- **Run the main application**: `uv run python fetch_data.py`
 - **Add new dependencies**: `uv add <package-name>`
 - **Update dependencies**: `uv sync --upgrade`
 
