@@ -400,7 +400,7 @@ class AShareAnalyzer:
         all_stocks.sort(key=lambda x: x['涨跌幅'], reverse=True)
         return all_stocks[:top_n]
     
-    def get_market_stats(self) -> Dict:
+    def get_(self) -> Dict:
         """获取市场整体统计数据（按板块分类）"""
         logger.info("开始获取市场整体统计数据")
         print("正在获取市场整体数据...")
