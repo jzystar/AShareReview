@@ -238,7 +238,7 @@ class AShareAnalyzer:
             board = '科创板'
         elif code.startswith('3'):
             board = '创业板'
-        elif code.startswith(('4', '8')):
+        elif code.startswith(('4', '8', '9')):
             board = '北交所'
         elif code.startswith(('0')):
             board = '主板'  # 深市主板
@@ -408,7 +408,7 @@ class AShareAnalyzer:
         try:
             logger.debug("获取上证指数数据")
             # 获取上证指数数据
-            sz_index = ak.stock_zh_index_spot_em(symbol="000001")
+            sz_index = ak.stock_zh_index_spot_em("沪深重要指数")
             
             # 使用缓存的股票数据
             stock_data = self.get_stock_data_with_board()
@@ -417,8 +417,8 @@ class AShareAnalyzer:
                 return {}
             
             # 计算各项指标
-            total_volume = stock_data['成交量'].sum()
-            total_amount = stock_data['成交额'].sum()
+            total_amount = (sz_index.iloc[0]['成交额'] + sz_index.iloc[1]['成交额']) // 10 ** 8
+            sz_amount_rate = sz_index.iloc[0]['量比']
             
             # 上证指数涨幅
             sz_change = 0
@@ -447,6 +447,7 @@ class AShareAnalyzer:
                     
                     # 按板块统计涨停数量
                     board_limit_up_counts = {}
+                    greater_than_ten_of_limit_up = 0
                     for board in ['主板', '科创板', '创业板', '北交所']:
                         board_limit_up = limit_up_data[limit_up_data['板块'] == board]
                         count = len(board_limit_up)
@@ -454,8 +455,11 @@ class AShareAnalyzer:
                         if board not in board_limit_stats:
                             board_limit_stats[board] = {}
                         board_limit_stats[board]['涨停数量'] = count
+                        if board != '主板':
+                            greater_than_ten_of_limit_up += count
                     
                     logger.info(f"各板块涨停数量: {board_limit_up_counts}")
+                    logger.info(f"主板外涨停数量: {greater_than_ten_of_limit_up}")
                 
                 logger.debug("获取炸板股池数据")
                 # 获取炸板股池（开板的涨停股）
@@ -491,6 +495,7 @@ class AShareAnalyzer:
                     logger.info(f"获取到 {limit_down_count} 只跌停股票")
                     
                     # 按板块统计跌停数量
+                    greater_than_ten_of_limit_down = 0
                     board_limit_down_counts = {}
                     for board in ['主板', '科创板', '创业板', '北交所']:
                         board_limit_down = limit_down_data[limit_down_data['板块'] == board]
@@ -499,22 +504,26 @@ class AShareAnalyzer:
                         if board not in board_limit_stats:
                             board_limit_stats[board] = {}
                         board_limit_stats[board]['跌停数量'] = count
+                        if board != '主板':
+                            greater_than_ten_of_limit_down += count
                     
                     logger.info(f"各板块跌停数量: {board_limit_down_counts}")
-                        
+                    logger.info(f"主板外跌停数量: {greater_than_ten_of_limit_down}")
             except Exception as e:
                 logger.error(f"获取跌停数据失败: {e}", exc_info=True)
                 print(f"获取跌停数据失败: {e}")
             
             # 按板块统计上涨下跌股票数量
             board_stats = {}
+            greater_than_ten_of_not_limit_up = 0
+            greater_than_ten_of_not_limit_down = 0
             for board in ['主板', '科创板', '创业板', '北交所']:
                 board_data = stock_data[stock_data['板块'] == board]
                 if not board_data.empty:
                     up_count = len(board_data[board_data['涨跌幅'] > 0])
                     down_count = len(board_data[board_data['涨跌幅'] < 0])
                     flat_count = len(board_data[board_data['涨跌幅'] == 0])
-                    total_board_stocks = len(board_data)
+                    total_board_stocks = up_count + down_count + flat_count
                     money_effect = (up_count / total_board_stocks * 100) if total_board_stocks > 0 else 0
                     
                     board_stats[board] = {
@@ -524,7 +533,9 @@ class AShareAnalyzer:
                         '平盘股票数': flat_count,
                         '赚钱效应': round(money_effect, 2)
                     }
-                    
+                    if board in ['科创板', '创业板']:
+                        greater_than_ten_of_not_limit_up += len(board_data[board_data['涨跌幅'] > 10]) - board_limit_stats[board]['涨停数量']
+                        greater_than_ten_of_not_limit_down += len(board_data[board_data['涨跌幅'] < -10]) - board_limit_stats[board]['跌停数量']
                     # 添加涨停跌停数据
                     if board in board_limit_stats:
                         board_stats[board].update(board_limit_stats[board])
@@ -532,7 +543,7 @@ class AShareAnalyzer:
                         # 计算炸板率
                         limit_up_board = board_limit_stats[board].get('涨停数量', 0)
                         exploded_board = board_limit_stats[board].get('炸板数量', 0)
-                        exploded_rate = (exploded_board / limit_up_board * 100) if limit_up_board > 0 else 0
+                        exploded_rate = (exploded_board / (limit_up_board + exploded_board) * 100) if (limit_up_board + exploded_board) > 0 else 0
                         board_stats[board]['炸板率'] = round(exploded_rate, 2)
             
             # 整体数据
@@ -541,27 +552,37 @@ class AShareAnalyzer:
             flat_count = len(stock_data[stock_data['涨跌幅'] == 0])
             
             # 赚钱效应（上涨股票比例）
-            total_stocks = len(stock_data)
+            total_stocks = up_count + down_count + flat_count
             money_effect = (up_count / total_stocks * 100) if total_stocks > 0 else 0
             
             logger.info(f"市场整体统计: 上涨{up_count}只, 下跌{down_count}只, 平盘{flat_count}只")
             logger.info(f"赚钱效应: {money_effect:.2f}%, 涨停{limit_up_count}只, 跌停{limit_down_count}只")
             
             # 计算整体炸板率
-            exploded_rate = (exploded_count / limit_up_count * 100) if limit_up_count > 0 else 0
-            
+            exploded_rate = (exploded_count / (limit_up_count + exploded_count) * 100) if (limit_up_count + exploded_count) > 0 else 0
+            if greater_than_ten_of_limit_down > 0:
+                up_down_rate = f"{limit_up_count}({greater_than_ten_of_limit_up})+{greater_than_ten_of_not_limit_up}:{limit_down_count}({greater_than_ten_of_limit_down})+{greater_than_ten_of_not_limit_down}"
+            else:
+                up_down_rate = f"{limit_up_count}({greater_than_ten_of_limit_up})+{greater_than_ten_of_not_limit_up}:{limit_down_count}+{greater_than_ten_of_not_limit_down}"
             result = {
-                '总成交量': total_volume,
-                '总成交额': total_amount,
+                '总成交额': f'{total_amount}亿',
                 '上证指数涨幅': sz_change,
+                '上证量比': sz_amount_rate,
+                '涨跌停比': up_down_rate,
                 '涨停数量': limit_up_count,
+                '主板外涨停数量': greater_than_ten_of_limit_up,
+                '涨幅大于10%的非涨停股票数': greater_than_ten_of_not_limit_up,
                 '跌停数量': limit_down_count,
+                '主板外跌停数量': greater_than_ten_of_limit_down,
+                '跌幅大于10%的非跌停股票数': greater_than_ten_of_not_limit_down,
                 '上涨股票数': up_count,
                 '下跌股票数': down_count,
                 '平盘股票数': flat_count,
-                '赚钱效应': round(money_effect, 2),
-                '炸板率': round(exploded_rate, 2),
+                '赚钱效应': f'{round(money_effect, 2)}%',
+                '炸板率': f'{round(exploded_rate, 2)}%',
+                
                 '分板块统计': board_stats
+                
             }
             
             return result
@@ -717,18 +738,14 @@ class AShareAnalyzer:
             # 第60个跌幅最大的股票
             decline_60th = None
             if len(declining_stocks) >= 60:
-                decline_60th = {
-                    '代码': declining_stocks.iloc[59]['代码'],
-                    '名称': declining_stocks.iloc[59]['名称'],
-                    '跌幅': declining_stocks.iloc[59]['涨跌幅']
-                }
+                decline_60th =  declining_stocks.iloc[59]['涨跌幅']
+                
             
             # 近3天跌幅超过20%的股票（简化版本，仅用当日跌幅估算）
-            heavy_decline_count = len(stock_data[stock_data['涨跌幅'] <= -15])  # 用单日跌幅估算
+            #heavy_decline_count = len(stock_data[stock_data['涨跌幅'] <= -15])  # 用单日跌幅估算
             
             return {
                 '第60个跌幅股票': decline_60th,
-                '重跌股票数量': heavy_decline_count
             }
             
         except Exception as e:
