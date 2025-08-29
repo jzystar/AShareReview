@@ -287,8 +287,8 @@ class AShareAnalyzer:
         logger.info(f"尝试加载历史数据: {date}")
         
         if not os.path.exists(filename):
-            logger.warning(f"历史数据文件不存在: {filename}")
-            print(f"未找到日期 {date} 的数据文件")
+            # logger.warning(f"历史数据文件不存在: {filename}")
+            # print(f"未找到日期 {date} 的数据文件")
             return None
         
         try:
@@ -319,14 +319,10 @@ class AShareAnalyzer:
                 
             date = (base_date - datetime.timedelta(days=i)).strftime('%Y%m%d')
             
-            # 对于今天的数据，使用传入的current_results而不是读取历史文件
-            if date == today_str:
-                if current_results:
-                    logger.debug(f"使用当前运行结果处理今天的数据 {date}")
-                    data = {'results': current_results}
-                else:
-                    logger.debug(f"跳过今天的日期 {date}，没有当前运行结果")
-                    continue
+            # 对于今天的数据，优先使用传入的current_results，否则读取历史文件
+            if date == today_str and current_results:
+                logger.debug(f"使用当前运行结果处理今天的数据 {date}")
+                data = {'results': current_results}
             else:
                 data = self.load_historical_data(date)
             
