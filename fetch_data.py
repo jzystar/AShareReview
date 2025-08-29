@@ -14,6 +14,7 @@ import os
 import logging
 from typing import Dict, List, Optional
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Font
 
 warnings.filterwarnings('ignore')
 
@@ -210,16 +211,20 @@ class AShareAnalyzer:
                     return f"{value}%" if add_percent else value
                 return value
             
-            # 格式化总成交额，添加"亿"字
+            # 格式化总成交额，添加"亿"字，数字部分使用整数
             def format_amount(value):
                 if value == '' or value is None:
                     return ''
-                # 如果已经包含"亿"字，直接返回
+                # 如果已经包含"亿"字，提取数字部分转为整数再重新格式化
                 if isinstance(value, str) and '亿' in value:
-                    return value
-                # 如果是数字，添加"亿"字
+                    try:
+                        num_part = float(value.replace('亿', ''))
+                        return f"{int(num_part)}亿"
+                    except ValueError:
+                        return value
+                # 如果是数字，转为整数后添加"亿"字
                 if isinstance(value, (int, float)):
-                    return f"{value}亿"
+                    return f"{int(value)}亿"
                 return value
             
             row_data = [
@@ -243,7 +248,18 @@ class AShareAnalyzer:
                 '昨日涨停表现', '昨日炸板表现'
             ]
             
+            # 提取赚钱效应数值，用于判断字体颜色
+            money_effect_value = safe_extract_value(market_stats.get('赚钱效应', 0))
+            if isinstance(money_effect_value, str) and '%' in money_effect_value:
+                try:
+                    money_effect_value = float(money_effect_value.replace('%', ''))
+                except ValueError:
+                    money_effect_value = 0
+            elif not isinstance(money_effect_value, (int, float)):
+                money_effect_value = 0
+            
             # 检查文件是否存在
+            new_row_num = None  # 记录新添加行的行号
             if os.path.exists(filename):
                 logger.debug(f"Excel文件已存在，追加数据: {filename}")
                 # 加载现有工作簿
@@ -260,6 +276,7 @@ class AShareAnalyzer:
                         
                 # 追加数据到最后一行
                 ws.append(row_data)
+                new_row_num = ws.max_row  # 获取新添加行的行号
             else:
                 logger.debug(f"创建新的Excel文件: {filename}")
                 # 创建新工作簿
@@ -271,6 +288,18 @@ class AShareAnalyzer:
                 ws.append(headers)
                 # 添加数据
                 ws.append(row_data)
+                new_row_num = ws.max_row  # 数据在第2行（第1行是表头）
+            
+            # 根据赚钱效应设置字体颜色 (第2列到第6列：上证量比到赚钱效应)
+            if new_row_num:
+                font_color = "FF0000" if money_effect_value >= 50 else "008000"  # 红色 或 绿色
+                font = Font(color=font_color)
+                logger.info(f"赚钱效应: {money_effect_value}%, 设置字体颜色: {'红色' if money_effect_value >= 50 else '绿色'}")
+                
+                # 设置第2列到第6列的字体颜色
+                for col in range(2, 7):  # 列B(2)到F(6)
+                    cell = ws.cell(row=new_row_num, column=col)
+                    cell.font = font
             
             # 保存文件
             wb.save(filename)
