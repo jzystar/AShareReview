@@ -171,7 +171,7 @@ class AShareAnalyzer:
     def save_to_excel(self, results: Dict):
         """保存复盘数据到年度Excel文件"""
         year = datetime.datetime.now().year
-        filename = f"复盘数据{year}.xlsx"
+        filename = f"复盘记录{year}.xlsx"
         logger.info(f"开始保存复盘数据到Excel文件: {filename}")
         
         try:
@@ -292,7 +292,7 @@ class AShareAnalyzer:
             
             # 根据赚钱效应设置字体颜色 (第2列到第6列：上证量比到赚钱效应)
             if new_row_num:
-                font_color = "FF0000" if money_effect_value >= 50 else "00FF00"  # 红色 或 绿色
+                font_color = "FF0000" if money_effect_value >= 50 else "00B050"  # 红色 或 绿色
                 font = Font(color=font_color)
                 logger.info(f"赚钱效应: {money_effect_value}%, 设置字体颜色: {'红色' if money_effect_value >= 50 else '绿色'}")
                 
