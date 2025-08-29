@@ -14,7 +14,7 @@ import os
 import logging
 from typing import Dict, List, Optional
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font
+from openpyxl.styles import Font, Alignment
 
 warnings.filterwarnings('ignore')
 
@@ -290,16 +290,21 @@ class AShareAnalyzer:
                 ws.append(row_data)
                 new_row_num = ws.max_row  # 数据在第2行（第1行是表头）
             
-            # 根据赚钱效应设置字体颜色 (第2列到第6列：上证量比到赚钱效应)
+            # 根据赚钱效应设置字体颜色和对齐方式
             if new_row_num:
                 font_color = "FF0000" if money_effect_value >= 50 else "00B050"  # 红色 或 绿色
                 font = Font(color=font_color)
+                alignment = Alignment(horizontal='left')  # 左对齐
                 logger.info(f"赚钱效应: {money_effect_value}%, 设置字体颜色: {'红色' if money_effect_value >= 50 else '绿色'}")
                 
-                # 设置第2列到第6列的字体颜色
-                for col in range(2, 7):  # 列B(2)到F(6)
+                # 设置所有列的对齐方式为左对齐
+                for col in range(1, len(headers) + 1):  # 所有列
                     cell = ws.cell(row=new_row_num, column=col)
-                    cell.font = font
+                    cell.alignment = alignment
+                    
+                    # 对第2列到第6列设置字体颜色
+                    if 2 <= col <= 6:  # 列B(2)到F(6)
+                        cell.font = font
             
             # 保存文件
             wb.save(filename)
