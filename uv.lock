@@ -120,6 +120,7 @@ dependencies = [
     { name = "akshare" },
     { name = "datetime" },
     { name = "numpy" },
+    { name = "openpyxl" },
     { name = "pandas" },
     { name = "requests" },
 ]
@@ -129,6 +130,7 @@ requires-dist = [
     { name = "akshare", specifier = ">=1.17.35" },
     { name = "datetime", specifier = ">=5.5" },
     { name = "numpy", specifier = ">=2.3.2" },
+    { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pandas", specifier = ">=2.3.1" },
     { name = "requests", specifier = ">=2.32.4" },
 ]

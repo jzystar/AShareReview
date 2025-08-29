@@ -13,6 +13,7 @@ import json
 import os
 import logging
 from typing import Dict, List, Optional
+from openpyxl import Workbook, load_workbook
 
 warnings.filterwarnings('ignore')
 
@@ -166,6 +167,120 @@ class AShareAnalyzer:
             logger.error(f"保存数据失败: {e}", exc_info=True)
             print(f"保存数据失败: {e}")
     
+    def save_to_excel(self, results: Dict):
+        """保存复盘数据到年度Excel文件"""
+        year = datetime.datetime.now().year
+        filename = f"复盘数据{year}.xlsx"
+        logger.info(f"开始保存复盘数据到Excel文件: {filename}")
+        
+        try:
+            # 提取需要的数据
+            market_stats = results.get('市场统计', {})
+            yesterday_perf = results.get('昨日涨停股表现', {})
+            decline_analysis = results.get('第60个跌幅股票', 0)
+            
+            # 安全提取数值的函数
+            def safe_extract_value(value, default=''):
+                if value is None:
+                    return default
+                if isinstance(value, (int, float)):
+                    return value
+                if isinstance(value, str):
+                    # 处理百分比格式
+                    if '%' in value:
+                        try:
+                            return float(value.replace('%', ''))
+                        except ValueError:
+                            return value
+                    # 处理"亿"格式
+                    if '亿' in value:
+                        try:
+                            return float(value.replace('亿', ''))
+                        except ValueError:
+                            return value
+                    return value
+                return value
+            
+            # 准备行数据，按TODO.md中指定的顺序
+            # 对于百分比数据，添加百分号（上证涨幅除外）
+            def format_percentage(value, add_percent=True):
+                if value == '' or value is None:
+                    return ''
+                if isinstance(value, (int, float)):
+                    return f"{value}%" if add_percent else value
+                return value
+            
+            # 格式化总成交额，添加"亿"字
+            def format_amount(value):
+                if value == '' or value is None:
+                    return ''
+                # 如果已经包含"亿"字，直接返回
+                if isinstance(value, str) and '亿' in value:
+                    return value
+                # 如果是数字，添加"亿"字
+                if isinstance(value, (int, float)):
+                    return f"{value}亿"
+                return value
+            
+            row_data = [
+                datetime.datetime.now().strftime('%Y/%m/%d'),  # 1. 日期
+                safe_extract_value(market_stats.get('上证量比', '')),  # 2. 上证量比
+                safe_extract_value(market_stats.get('上证指数涨幅', '')),  # 3. 上证涨幅（不加百分号）
+                format_amount(safe_extract_value(market_stats.get('总成交额', ''))),  # 4. 总成交额
+                safe_extract_value(market_stats.get('涨跌停比', '')),  # 5. 涨跌停比
+                format_percentage(safe_extract_value(market_stats.get('赚钱效应', ''))),  # 6. 赚钱效应
+                format_percentage(safe_extract_value(market_stats.get('炸板率', ''))),  # 7. 炸板率
+                safe_extract_value(decline_analysis),  # 8. 第60个跌幅股票
+                safe_extract_value(market_stats.get('连板数量', '')),  # 9. 连板数量
+                format_percentage(safe_extract_value(yesterday_perf.get('今日平均表现', ''))),  # 10. 昨日涨停表现
+                format_percentage(safe_extract_value(yesterday_perf.get('昨日炸板股今日平均', '')))  # 11. 昨日炸板表现
+            ]
+            
+            # 表头
+            headers = [
+                '日期', '上证量比', '上证涨幅', '总成交额', '涨跌停比', 
+                '赚钱效应', '炸板率', '第60个跌幅股票', '连板数量', 
+                '昨日涨停表现', '昨日炸板表现'
+            ]
+            
+            # 检查文件是否存在
+            if os.path.exists(filename):
+                logger.debug(f"Excel文件已存在，追加数据: {filename}")
+                # 加载现有工作簿
+                wb = load_workbook(filename)
+                ws = wb.active
+                
+                # 检查是否已有今天的数据（避免重复）
+                today_str = datetime.datetime.now().strftime('%Y/%m/%d')
+                for row in ws.iter_rows(min_row=2, max_col=1, values_only=True):
+                    if row[0] == today_str:
+                        logger.warning(f"今天的数据已存在，跳过保存")
+                        print(f"今天 ({today_str}) 的数据已存在于Excel文件中")
+                        return
+                        
+                # 追加数据到最后一行
+                ws.append(row_data)
+            else:
+                logger.debug(f"创建新的Excel文件: {filename}")
+                # 创建新工作簿
+                wb = Workbook()
+                ws = wb.active
+                ws.title = f"{year}年复盘数据"
+                
+                # 添加表头
+                ws.append(headers)
+                # 添加数据
+                ws.append(row_data)
+            
+            # 保存文件
+            wb.save(filename)
+            logger.info(f"Excel数据保存成功: {filename}")
+            print(f"复盘数据已保存到Excel: {filename}")
+            
+        except Exception as e:
+            logger.error(f"保存Excel数据失败: {e}", exc_info=True)
+            print(f"保存Excel数据失败: {e}")
+    
     def load_historical_data(self, date: str) -> Optional[Dict]:
         """加载指定日期的历史数据"""
         filename = f"{self.data_dir}/ashare_analysis_{date}.json"
@@ -191,10 +306,11 @@ class AShareAnalyzer:
             print(f"加载历史数据失败: {e}")
             return None
     
-    def get_historical_summary(self, max_days: int = 7) -> Dict:
+    def get_historical_summary(self, max_days: int = 7, current_results: Optional[Dict] = None) -> Dict:
         """获取最近有数据的N天数据摘要（最多max_days天）"""
         summary = []
         base_date = datetime.datetime.now()
+        today_str = base_date.strftime('%Y%m%d')
         
         # 向前搜索最多30天，找到有效数据
         for i in range(30):  # 最多搜索30天来找到有效数据
@@ -202,7 +318,17 @@ class AShareAnalyzer:
                 break
                 
             date = (base_date - datetime.timedelta(days=i)).strftime('%Y%m%d')
-            data = self.load_historical_data(date)
+            
+            # 对于今天的数据，使用传入的current_results而不是读取历史文件
+            if date == today_str:
+                if current_results:
+                    logger.debug(f"使用当前运行结果处理今天的数据 {date}")
+                    data = {'results': current_results}
+                else:
+                    logger.debug(f"跳过今天的日期 {date}，没有当前运行结果")
+                    continue
+            else:
+                data = self.load_historical_data(date)
             
             if data and 'results' in data:
                 results = data['results']
@@ -452,7 +578,7 @@ class AShareAnalyzer:
                 return {}
             
             # 计算各项指标
-            total_amount = (sz_index.iloc[0]['成交额'] + sz_index.iloc[1]['成交额']) // 10 ** 8
+            total_amount = int(sz_index.iloc[0]['成交额'] + sz_index.iloc[1]['成交额']) // 10 ** 8
             sz_amount_rate = sz_index.iloc[0]['量比']
             
             # 上证指数涨幅
@@ -849,9 +975,9 @@ class AShareAnalyzer:
         results.update(decline_analysis)
         logger.info(f"步骤6完成: 获取了 {len(decline_analysis)} 项跌幅分析数据")
         
-        # 7. 获取历史数据摘要
+        # 7. 获取历史数据摘要（包含今天的数据）
         logger.info("步骤8: 获取历史数据摘要")
-        historical_summary = self.get_historical_summary(1)
+        historical_summary = self.get_historical_summary(7, results)
         results.update(historical_summary)
         logger.info(f"步骤7完成: 获取了 {len(historical_summary)} 项历史数据")
         
@@ -878,6 +1004,11 @@ def main():
         logger.info("开始保存分析结果")
         analyzer.save_results(results)
         logger.info("分析结果保存成功")
+        
+        # 保存到Excel文件
+        logger.info("开始保存复盘数据到Excel")
+        analyzer.save_to_excel(results)
+        logger.info("复盘数据Excel保存成功")
         
         # 输出结果
         logger.info("开始输出分析结果汇总")
@@ -918,8 +1049,8 @@ def main():
                         up_down_ratio = up_down_ratio[:16] + ".."
                     
                     print(f"{day['date']} {day['limit_up_count']:4d} {day['limit_down_count']:4d} "
-                          f"{up_down_ratio:18s} {day['total_amount']:6.0f}亿 {day['sz_index_change']:7.2f}% {day['sz_amount_rate']:4.2f} "
-                          f"{day['money_effect']:7.2f}% {day['exploded_rate']:6.2f}% | "
+                          f"{up_down_ratio:18s} {day['total_amount']:6.0f}亿 {day['sz_index_change']:7.2f}% {day['sz_amount_rate']:5.2f} "
+                          f"{day['money_effect']:7.2f}% {day['exploded_rate']:6.2f}%  | "
                           f"{day['yesterday_limit_count']:7d} {day['yesterday_avg_perf']:8.2f}% {day['yesterday_up_ratio']:6.2f}% {day['exploded_avg_perf']:7.2f}%{valid_marker}")
                 
                 # 添加说明
