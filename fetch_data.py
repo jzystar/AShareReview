@@ -390,7 +390,7 @@ class AShareAnalyzer:
         """根据股票代码判断所属板块"""
         code = str(stock_code)
         
-        if code.startswith('688'):
+        if code.startswith('68'):
             board = '科创板'
         elif code.startswith('3'):
             board = '创业板'
