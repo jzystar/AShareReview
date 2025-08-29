@@ -46,29 +46,38 @@ def view_historical_data(date: str):
 def view_summary(days: int = 7):
     """查看最近N天的数据摘要"""
     analyzer = AShareAnalyzer()
-    summary_data = analyzer.get_historical_summary(days)
+    # 对于view_history.py，我们不传入current_results，让它读取所有历史文件（包括今天的）
+    summary_data = analyzer.get_historical_summary(days, current_results=None)
     
     historical = summary_data.get('historical_summary', [])
     if not historical:
         print("未找到历史数据")
         return
     
-    print(f"近{days}日市场概况")
-    print("="*75)
-    print("日期       涨停 跌停 赚钱效应 炸板率 上证涨幅 | 昨涨停数 平均表现 上涨率 炸板表现")
-    print("-" * 75)
+    print(f"\n【近{len(historical)}日市场概况】")
+    print("日期       涨停 跌停 涨跌停比          成交额 上证涨幅   量比  赚钱效应 炸板率 | 昨涨停数 涨停表现  上涨率 炸板表现")
+    print("-" * 130)
     
     for day in historical:
         # 检查数据有效性
         valid_marker = "" if day.get('has_valid_data', False) else " *"
+        up_down_ratio = str(day.get('up_down_ratio', 'N/A'))
+        if len(up_down_ratio) > 18:
+            up_down_ratio = up_down_ratio[:16] + ".."
+        
         print(f"{day['date']} {day['limit_up_count']:4d} {day['limit_down_count']:4d} "
-              f"{day['money_effect']:7.2f}% {day['exploded_rate']:6.2f}% {day['sz_index_change']:7.2f}% | "
-              f"{day['yesterday_limit_count']:7d} {day['yesterday_avg_perf']:7.2f}% {day['yesterday_up_ratio']:6.2f}% "
-              f"{day.get('exploded_avg_perf', 0):7.2f}%{valid_marker}")
+              f"{up_down_ratio:18s} {day['total_amount']:6.0f}亿 {day['sz_index_change']:7.2f}% {day['sz_amount_rate']:5.2f} "
+              f"{day['money_effect']:7.2f}% {day['exploded_rate']:6.2f}%  | "
+              f"{day['yesterday_limit_count']:7d} {day['yesterday_avg_perf']:8.2f}% {day['yesterday_up_ratio']:6.2f}% {day['exploded_avg_perf']:7.2f}%{valid_marker}")
     
     # 添加说明
     if any(not day.get('has_valid_data', False) for day in historical):
-        print("\n* 标记的日期数据获取失败（网络问题或接口异常）")
+        print("\n* 标记的日期数据不完整")
+        
+    # 添加字段说明
+    print("\n字段说明:")
+    print("涨跌停比=涨停(主板外)+涨幅>10%非涨停:跌停(主板外)+跌幅>10%非跌停")
+    print("炸板表现=昨日炸板股今日平均表现")
 
 def main():
     parser = argparse.ArgumentParser(description='查看A股历史分析数据')
