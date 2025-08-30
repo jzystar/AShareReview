@@ -294,7 +294,7 @@ class AShareAnalyzer:
             if new_row_num:
                 font_color = "FF0000" if money_effect_value >= 50 else "00B050"  # 红色 或 绿色
                 font = Font(color=font_color)
-                alignment = Alignment(horizontal='left')  # 左对齐
+                alignment = Alignment(horizontal='left', vertical='top')  # 左对齐 + 上对齐
                 logger.info(f"赚钱效应: {money_effect_value}%, 设置字体颜色: {'红色' if money_effect_value >= 50 else '绿色'}")
                 
                 # 设置所有列的对齐方式为左对齐
